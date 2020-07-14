@@ -17,8 +17,8 @@ import os
 import scipy.stats
 import tensorflow as tf
 
-
 EPS = 1E-6
+
 
 class DIAYN(SAC):
 
@@ -41,7 +41,8 @@ class DIAYN(SAC):
                  best_skill_n_rollouts=10,
                  learn_p_z=False,
                  include_actions=False,
-                 add_p_z=True):
+                 add_p_z=True,
+                 use_task_reward=False):
         """
         Args:
             base_kwargs (dict): dictionary of base arguments that are directly
@@ -73,6 +74,7 @@ class DIAYN(SAC):
         Serializable.quick_init(self, locals())
         super(SAC, self).__init__(**base_kwargs)
 
+        self.use_task_reward = use_task_reward
         self._env = env
         self._policy = policy
         self._discriminator = discriminator
@@ -89,7 +91,11 @@ class DIAYN(SAC):
         self._discount = discount
         self._tau = tau
         self._num_skills = num_skills
+
+        # probability of each skill is initialised to be equal.
         self._p_z = np.full(num_skills, 1.0 / num_skills)
+
+        # not sure about the use of this.
         self._find_best_skill_interval = find_best_skill_interval
         self._best_skill_n_rollouts = best_skill_n_rollouts
         self._learn_p_z = learn_p_z
@@ -106,8 +112,9 @@ class DIAYN(SAC):
         self._init_actor_update()
         self._init_critic_update()
         self._init_discriminator_update()
-        self._init_target_ops()
 
+        # these are basically the ops for the target network.
+        self._init_target_ops()
 
         self._sess.run(tf.global_variables_initializer())
 
@@ -121,6 +128,14 @@ class DIAYN(SAC):
             - terminals
             - zs
         """
+
+        # might have to add a reward placeholder here for adding task reward function.
+        if self.use_task_reward:
+            self._task_reward_pl = tf.placeholder(
+                                tf.float32,
+                                shape=[None],
+                                name='task_reward',
+                            )
 
         self._obs_pl = tf.placeholder(
             tf.float32,
@@ -156,6 +171,12 @@ class DIAYN(SAC):
         return np.random.choice(self._num_skills, p=self._p_z)
 
     def _split_obs(self):
+
+        # tf.split(
+        #     value, num_or_size_splits, axis=0, num=None, name='split'
+        # )
+
+        # takes out the actual environment observation from the augumented observation.
         return tf.split(self._obs_pl, [self._Do, self._num_skills], 1)
 
     def _init_critic_update(self):
@@ -172,33 +193,52 @@ class DIAYN(SAC):
         self._qf_t = self._qf.get_output_for(
             self._obs_pl, self._action_pl, reuse=True)  # N
 
+        # does the discriminator use states or both states and action. The DIYAN paper seems to be only
+        # using states.
         (obs, z_one_hot) = self._split_obs()
         if self._include_actions:
             logits = self._discriminator.get_output_for(obs, self._action_pl,
                                                         reuse=True)
+        # the formulation used in the paper.
         else:
             logits = self._discriminator.get_output_for(obs, reuse=True)
+
+        # log(q_\phi(z | s_t+1)
         reward_pl = -1 * tf.nn.softmax_cross_entropy_with_logits(labels=z_one_hot,
                                                                  logits=logits)
+        # just checks for any unnecessary infs and NaNs
         reward_pl = tf.check_numerics(reward_pl, 'Check numerics (1): reward_pl')
+
         p_z = tf.reduce_sum(self._p_z_pl * z_one_hot, axis=1)
         log_p_z = tf.log(p_z + EPS)
         self._log_p_z = log_p_z
         if self._add_p_z:
             reward_pl -= log_p_z
             reward_pl = tf.check_numerics(reward_pl, 'Check numerics: reward_pl')
+
+        if self.use_task_reward:
+            reward_pl += self._task_reward_pl
+            reward_pl = tf.check_numerics(reward_pl, 'Check numerics: reward_pl')
+
         self._reward_pl = reward_pl
 
         with tf.variable_scope('target'):
             vf_next_target_t = self._vf.get_output_for(self._obs_next_pl)  # N
             self._vf_target_params = self._vf.get_params_internal()
 
+        # tf.stop_gradient provides a way to not compute gradient with respect to
+        # some variables during back-propagation.
+        #  If you insert this op in the graph it inputs are masked from the gradient generator.
+        #  They are not taken into account for computing gradients.
+
+        # this seems to be done so that the loss' gradient is only taken wrt to qf params only.
         ys = tf.stop_gradient(
             reward_pl + (1 - self._terminal_pl) * self._discount * vf_next_target_t
         )  # N
 
-        self._td_loss_t = 0.5 * tf.reduce_mean((ys - self._qf_t)**2)
+        self._td_loss_t = 0.5 * tf.reduce_mean((ys - self._qf_t) ** 2)
 
+        # create the optimiser for minimising the loss.
         qf_train_op = tf.train.AdamOptimizer(self._qf_lr).minimize(
             loss=self._td_loss_t,
             var_list=self._qf.get_params_internal()
@@ -224,26 +264,32 @@ class DIAYN(SAC):
 
         self._policy_dist = self._policy.get_distribution_for(
             self._obs_pl, reuse=True)
+
         log_pi_t = self._policy_dist.log_p_t  # N
 
+        # value of the current state.
         self._vf_t = self._vf.get_output_for(self._obs_pl, reuse=True)  # N
         self._vf_params = self._vf.get_params_internal()
 
         log_target_t = self._qf.get_output_for(
             self._obs_pl, tf.tanh(self._policy_dist.x_t), reuse=True)  # N
         corr = self._squash_correction(self._policy_dist.x_t)
+
+        # just to check for any Nans and infs etc.
         corr = tf.check_numerics(corr, 'Check numerics: corr')
 
         scaled_log_pi = self._scale_entropy * (log_pi_t - corr)
 
         self._kl_surrogate_loss_t = tf.reduce_mean(log_pi_t * tf.stop_gradient(
             scaled_log_pi - log_target_t + self._vf_t)
-        )
+                                                   )
 
         self._vf_loss_t = 0.5 * tf.reduce_mean(
-            (self._vf_t - tf.stop_gradient(log_target_t - scaled_log_pi))**2
+            (self._vf_t - tf.stop_gradient(log_target_t - scaled_log_pi)) ** 2
         )
 
+        # the loss would have to be added here.
+        # would need to add the task reward here.
         policy_train_op = tf.train.AdamOptimizer(self._policy_lr).minimize(
             loss=self._kl_surrogate_loss_t + self._policy_dist.reg_loss_t,
             var_list=self._policy.get_params_internal()
@@ -256,7 +302,6 @@ class DIAYN(SAC):
 
         self._training_ops.append(policy_train_op)
         self._training_ops.append(vf_train_op)
-
 
     def _init_discriminator_update(self):
         (obs, z_one_hot) = self._split_obs()
@@ -277,23 +322,37 @@ class DIAYN(SAC):
         )
         self._training_ops.append(discriminator_train_op)
 
-
     def _get_feed_dict(self, batch):
         """Construct TensorFlow feed_dict from sample batch."""
 
-        feed_dict = {
-            self._obs_pl: batch['observations'],
-            self._action_pl: batch['actions'],
-            self._obs_next_pl: batch['next_observations'],
-            self._terminal_pl: batch['terminals'],
-            self._p_z_pl: self._p_z,
-        }
+        # print("get feed called.")
+        # environment reward placeholder would also have to be assigned here.
+        if not self.use_task_reward:
+            feed_dict = {
+                self._obs_pl: batch['observations'],
+                self._action_pl: batch['actions'],
+                self._obs_next_pl: batch['next_observations'],
+                self._terminal_pl: batch['terminals'],
+                self._p_z_pl: self._p_z,
+            }
+
+        else:
+            feed_dict = {
+                self._task_reward_pl: batch['rewards'],
+                self._obs_pl: batch['observations'],
+                self._action_pl: batch['actions'],
+                self._obs_next_pl: batch['next_observations'],
+                self._terminal_pl: batch['terminals'],
+                self._p_z_pl: self._p_z,
+            }
 
         return feed_dict
 
     def _get_best_single_option_policy(self):
         best_returns = float('-inf')
         best_z = None
+
+        # iterate over all the skills.
         for z in range(self._num_skills):
             fixed_z_policy = FixedOptionPolicy(self._policy, self._num_skills, z)
             paths = rollouts(self._eval_env, fixed_z_policy,
@@ -319,7 +378,6 @@ class DIAYN(SAC):
         with open(filename, 'w') as f:
             json.dump(obs_vec, f)
 
-
     def _evaluate(self, epoch):
         """Perform evaluation for the current policy.
 
@@ -334,6 +392,7 @@ class DIAYN(SAC):
         if self._eval_n_episodes < 1:
             return
 
+        # check if this is the interval for calculating the best skill.
         if epoch % self._find_best_skill_interval == 0:
             self._single_option_policy = self._get_best_single_option_policy()
         for (policy, policy_name) in [(self._single_option_policy, 'best_single_option_policy')]:
@@ -347,6 +406,7 @@ class DIAYN(SAC):
                         paths = rollouts(self._eval_env, policy,
                                          self._max_path_length, self._eval_n_episodes)
 
+                # these are indeed task rewards.
                 total_returns = [path['rewards'].sum() for path in paths]
                 episode_lengths = [len(p['rewards']) for p in paths]
 
@@ -389,14 +449,19 @@ class DIAYN(SAC):
                                       save_itrs=True):
                 logger.push_prefix('Epoch #%d | ' % epoch)
 
-
                 path_length_list = []
+
+                # first get a value of z.
                 z = self._sample_z()
+
+                # not sure why augumented observation also has number of skills in it.
+                # this augumented observation is just
                 aug_obs = utils.concat_obs_z(observation, z, self._num_skills)
 
                 for t in range(self._epoch_length):
                     iteration = t + epoch * self._epoch_length
 
+                    # sample the action
                     action, _ = policy.get_action(aug_obs)
 
                     if self._learn_p_z:
@@ -405,11 +470,16 @@ class DIAYN(SAC):
                                      self._discriminator._action_pl: action[None]}
                         logits = tf_utils.get_default_session().run(
                             self._discriminator._output_t, feed_dict)[0]
+
+                        # this is log probability of z given the state.
                         log_p_z = np.log(utils._softmax(logits)[z])
+
                         if self._learn_p_z:
                             log_p_z_list[z].append(log_p_z)
 
                     next_ob, reward, terminal, info = env.step(action)
+                    # print("reward is: ", reward)
+
                     aug_next_ob = utils.concat_obs_z(next_ob, z,
                                                      self._num_skills)
                     path_length += 1
@@ -435,7 +505,6 @@ class DIAYN(SAC):
                         path_return = 0
                         n_episodes += 1
 
-
                     else:
                         aug_obs = aug_next_ob
                     gt.stamp('sample')
@@ -443,6 +512,8 @@ class DIAYN(SAC):
                     if self._pool.size >= self._min_pool_size:
                         for i in range(self._n_train_repeat):
                             batch = self._pool.random_batch(self._batch_size)
+
+                            # this is where the updates are being made.
                             self._do_training(iteration, batch)
 
                     gt.stamp('train')
@@ -451,11 +522,13 @@ class DIAYN(SAC):
                     print('learning p(z)')
                     for z in range(self._num_skills):
                         if log_p_z_list[z]:
-                            print('\t skill = %d, min=%.2f, max=%.2f, mean=%.2f, len=%d' % (z, np.min(log_p_z_list[z]), np.max(log_p_z_list[z]), np.mean(log_p_z_list[z]), len(log_p_z_list[z])))
-                    log_p_z = [np.mean(log_p_z) if log_p_z else np.log(1.0 / self._num_skills) for log_p_z in log_p_z_list]
+                            print('\t skill = %d, min=%.2f, max=%.2f, mean=%.2f, len=%d' % (
+                            z, np.min(log_p_z_list[z]), np.max(log_p_z_list[z]), np.mean(log_p_z_list[z]),
+                            len(log_p_z_list[z])))
+                    log_p_z = [np.mean(log_p_z) if log_p_z else np.log(1.0 / self._num_skills) for log_p_z in
+                               log_p_z_list]
                     print('log_p_z: %s' % log_p_z)
                     self._p_z = utils._softmax(log_p_z)
-
 
                 self._evaluate(epoch)
 
@@ -463,6 +536,7 @@ class DIAYN(SAC):
                 logger.save_itr_params(epoch, params)
                 times_itrs = gt.get_times().stamps.itrs
 
+                # some additional stuff to be added to the logger.
                 eval_time = times_itrs['eval'][-1] if epoch > 1 else 0
                 total_time = gt.get_times().total
                 logger.record_tabular('time-train', times_itrs['train'][-1])
@@ -482,7 +556,6 @@ class DIAYN(SAC):
                 gt.stamp('eval')
 
             env.terminate()
-
 
     @overrides
     def log_diagnostics(self, batch):
