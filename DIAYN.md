@@ -32,6 +32,13 @@ Training a new set of skills is as easy as running
 
 python examples/mujoco_all_diayn.py --env=half-cheetah --log_dir=data/demo
 ```
+
+To add environment reward to the training objective, specify use_task_reward=True, while initialisting the 
+DIYAN object. 
+
+To plot training curves from a progress.csv file use the script plot_train_stats.py and specify the input and output path
+in the script.
+
 The following environments are currently supported: `swimmer, hopper, walker, half-cheetah, ant, humanoid, point, point-maze, inverted-pendulum, inverted-double-pendulum, mountain-car, lunar-lander, bipedal-walker`. To add a new environment, simply add a new entry to the `ENV_PARAMS` dictionary on line 54 of `mujoco_all_diayn.py`.
 The log directory specifies where checkpoints and the `progress.csv` log will be saved. Set this to `/dev/null` if you don't want to save these.
 The [rllab](https://github.com/rll/rllab) library has a script [frontend.py](https://github.com/rll/rllab/blob/master/rllab/viskit/frontend.py) that can be used for plotting training in real time (using the `progress.csv` log). Note that the script must be re-run every time the log is updated:
