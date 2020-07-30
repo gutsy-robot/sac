@@ -34,7 +34,7 @@ if __name__ == "__main__":
         policy = data['policy']
         env = data['env']
         num_skills = data['policy'].observation_space.flat_dim - data['env'].spec.observation_space.flat_dim
-
+        print('num_skills', num_skills)
         with policy.deterministic(args.deterministic):
             for z in range(num_skills):
                 fixed_z_policy = FixedOptionPolicy(policy, num_skills, z)
