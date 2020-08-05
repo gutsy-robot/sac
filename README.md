@@ -83,11 +83,19 @@ cd sac
 ```
 
 5. Create and activate conda environment
-```
-cd sac
-conda env create -f environment.yml
-source activate sac
-```
+	1. conda and pip (worked)
+	```
+	conda create -n sac python=3.5 pip
+	conda activate sac
+	pip install -r requirements.txt
+	```
+	1. conda yml file (didn't work for me)
+	```
+	cd sac
+	conda env create -f environment.yml
+	source activate sac
+	```
+
 
 The environment should be ready to run. See examples section for examples of how to train and simulate the agents.
 
