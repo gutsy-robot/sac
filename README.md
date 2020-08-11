@@ -85,9 +85,9 @@ cd sac
 5. Create and activate conda environment
 	1. conda and pip (worked)
 	```
-	conda create -n sac python=3.5 pip
+	conda create -n sac tensorflow-gpu=1
 	conda activate sac
-	pip install -r requirements.txt
+	pip install -r requirements2.txt
 	```
 	1. conda yml file (didn't work for me)
 	```
