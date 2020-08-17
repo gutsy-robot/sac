@@ -185,6 +185,9 @@ def run_experiment(variant):
     elif variant['env_name'] == 'swimmer-rllab':
         from rllab.envs.mujoco.swimmer_env import SwimmerEnv
         env = normalize(SwimmerEnv())
+    elif variant['env_name'] == 'point-rllab':
+        from rllab.envs.mujoco.point_env import PointEnv
+        env = normalize(PointEnv())
     else:
         env = normalize(GymEnv(variant['env_name']))
 
