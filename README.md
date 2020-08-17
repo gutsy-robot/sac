@@ -88,6 +88,7 @@ cd sac
 	conda create -n sac tensorflow-gpu=1
 	conda activate sac
 	pip install -r requirements2.txt
+	pip install git+https://github.com/Theano/Theano.git@adfe319ce6b781083d8dc3200fb4481b00853791#egg=Theano
 	```
 	1. conda yml file (didn't work for me)
 	```
