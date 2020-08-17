@@ -8,7 +8,7 @@ from sac.algos.sac import SAC
 from sac.misc import tf_utils, utils
 from sac.misc.sampler import rollouts
 from sac.policies.hierarchical_policy import FixedOptionPolicy
-
+import time
 from collections import deque
 import gtimer as gt
 import json
@@ -42,7 +42,8 @@ class DIAYN(SAC):
                  learn_p_z=False,
                  include_actions=False,
                  add_p_z=True,
-                 use_task_reward=False):
+                 use_task_reward=False,
+                 use_diyan=True):
         """
         Args:
             base_kwargs (dict): dictionary of base arguments that are directly
@@ -70,6 +71,7 @@ class DIAYN(SAC):
                 discriminator.
             add_p_z (`bool`): Whether th include log p(z) in the pseudo-reward.
         """
+        print("number of best_skill_n_rollouts ", best_skill_n_rollouts)
 
         Serializable.quick_init(self, locals())
         super(SAC, self).__init__(**base_kwargs)
@@ -103,6 +105,7 @@ class DIAYN(SAC):
         self._include_actions = include_actions
         self._add_p_z = add_p_z
 
+        self.use_diayan = use_diyan
         self._Da = self._env.action_space.flat_dim
         self._Do = self._env.observation_space.flat_dim
 
@@ -111,6 +114,7 @@ class DIAYN(SAC):
         self._init_placeholders()
         self._init_actor_update()
         self._init_critic_update()
+
         self._init_discriminator_update()
 
         # these are basically the ops for the target network.
@@ -137,17 +141,30 @@ class DIAYN(SAC):
                                 name='task_reward',
                             )
 
+        # this needs to be changed to just Do when using pure SAC.
+        # if self.use_diayan:
         self._obs_pl = tf.placeholder(
             tf.float32,
             shape=[None, self._Do + self._num_skills],
             name='observation',
         )
 
+        # else:
+        #     self._obs_pl = tf.placeholder(
+        #         tf.float32,
+        #         shape=[None, self._Do],
+        #         name='observation',
+        #     )
+
+        # this also just needs to be changed to just Do when using pure SAC.
+
         self._obs_next_pl = tf.placeholder(
             tf.float32,
             shape=[None, self._Do + self._num_skills],
             name='next_observation',
         )
+
+        # no changes needed on this for pure SAC.
         self._action_pl = tf.placeholder(
             tf.float32,
             shape=[None, self._Da],
@@ -160,6 +177,7 @@ class DIAYN(SAC):
             name='terminals',
         )
 
+        # this needs to be removed when using pure SAC.
         self._p_z_pl = tf.placeholder(
             tf.float32,
             shape=[self._num_skills],
@@ -193,6 +211,7 @@ class DIAYN(SAC):
         self._qf_t = self._qf.get_output_for(
             self._obs_pl, self._action_pl, reuse=True)  # N
 
+        # this whole block needs to be removed if using only pure SAC.
         # does the discriminator use states or both states and action. The DIYAN paper seems to be only
         # using states.
         (obs, z_one_hot) = self._split_obs()
@@ -322,11 +341,12 @@ class DIAYN(SAC):
         )
         self._training_ops.append(discriminator_train_op)
 
-    def _get_feed_dict(self, batch):
+    def _get_feed_dict(self, batch, itr=None):
         """Construct TensorFlow feed_dict from sample batch."""
 
         # print("get feed called.")
         # environment reward placeholder would also have to be assigned here.
+        # here also change required for pure sac
         if not self.use_task_reward:
             feed_dict = {
                 self._obs_pl: batch['observations'],
@@ -337,6 +357,8 @@ class DIAYN(SAC):
             }
 
         else:
+            # print("type is: ", type(batch))
+            # time.sleep(10)
             feed_dict = {
                 self._task_reward_pl: batch['rewards'],
                 self._obs_pl: batch['observations'],
@@ -347,6 +369,14 @@ class DIAYN(SAC):
             }
 
         return feed_dict
+
+    def _do_training(self, itr, batch):
+        """Runs the operations for updating training and target ops."""
+
+        feed_dict = self._get_feed_dict(batch, itr=itr)
+        self._sess.run(self._training_ops, feed_dict)
+        self._sess.run(self._target_ops)
+
 
     def _get_best_single_option_policy(self):
         best_returns = float('-inf')
@@ -388,7 +418,9 @@ class DIAYN(SAC):
         :param epoch: The epoch number.
         :return: None
         """
-
+        # print("evaluate called")
+        # time.sleep(10)
+        print("eval_n_episodes: ", self._eval_n_episodes)
         if self._eval_n_episodes < 1:
             return
 
@@ -409,7 +441,7 @@ class DIAYN(SAC):
                 # these are indeed task rewards.
                 total_returns = [path['rewards'].sum() for path in paths]
                 episode_lengths = [len(p['rewards']) for p in paths]
-
+                # print("return-average: ", total_returns)
                 logger.record_tabular('return-average', np.mean(total_returns))
                 logger.record_tabular('return-min', np.min(total_returns))
                 logger.record_tabular('return-max', np.max(total_returns))
@@ -438,6 +470,7 @@ class DIAYN(SAC):
             max_path_return = -np.inf
             n_episodes = 0
 
+            # this can be omitted for pure SAC.
             if self._learn_p_z:
                 log_p_z_list = [deque(maxlen=self._max_path_length) for _ in range(self._num_skills)]
 
@@ -451,6 +484,7 @@ class DIAYN(SAC):
 
                 path_length_list = []
 
+                # z and augumentation of observation is also not required here.
                 # first get a value of z.
                 z = self._sample_z()
 
@@ -458,12 +492,14 @@ class DIAYN(SAC):
                 # this augumented observation is just
                 aug_obs = utils.concat_obs_z(observation, z, self._num_skills)
 
+                # t seems to be the number of steps per episode.
                 for t in range(self._epoch_length):
                     iteration = t + epoch * self._epoch_length
 
                     # sample the action
                     action, _ = policy.get_action(aug_obs)
 
+                    # add aditional check here.
                     if self._learn_p_z:
                         (obs, _) = utils.split_aug_obs(aug_obs, self._num_skills)
                         feed_dict = {self._discriminator._obs_pl: obs[None],
@@ -480,6 +516,7 @@ class DIAYN(SAC):
                     next_ob, reward, terminal, info = env.step(action)
                     # print("reward is: ", reward)
 
+                    # this won't be needed with pure SAC.
                     aug_next_ob = utils.concat_obs_z(next_ob, z,
                                                      self._num_skills)
                     path_length += 1
@@ -564,22 +601,40 @@ class DIAYN(SAC):
         Records mean and standard deviation of Q-function and state
         value function, the TD-loss (mean squared Bellman error), and the
         discriminator loss (cross entropy) for the sample batch.
+        discriminator loss (cross entropy) for the sample batch.
 
         Also calls the `draw` method of the plotter, if plotter defined.
         """
 
         feed_dict = self._get_feed_dict(batch)
-        log_pairs = [
-            ('qf', self._qf_t),
-            ('vf', self._vf_t),
-            ('bellman-error', self._td_loss_t),
-            ('discriminator-loss', self._discriminator_loss),
-            ('vf-loss', self._vf_loss_t),
-            ('kl-surrogate-loss', self._kl_surrogate_loss_t),
-            ('policy-reg-loss', self._policy_dist.reg_loss_t),
-            ('discriminator_reward', self._reward_pl),
-            ('log_p_z', self._log_p_z),
-        ]
+
+        # might need to remove log_p_z from here.
+        if  self.use_task_reward:
+            log_pairs = [
+                ('qf', self._qf_t),
+                ('vf', self._vf_t),
+                ('bellman-error', self._td_loss_t),
+                ('discriminator-loss', self._discriminator_loss),
+                ('vf-loss', self._vf_loss_t),
+                ('kl-surrogate-loss', self._kl_surrogate_loss_t),
+                ('policy-reg-loss', self._policy_dist.reg_loss_t),
+                ('discriminator_reward', self._reward_pl),
+                ('log_p_z', self._log_p_z),
+                ('task_reward', self._task_reward_pl),
+            ]
+        else:
+            log_pairs = [
+                ('qf', self._qf_t),
+                ('vf', self._vf_t),
+                ('bellman-error', self._td_loss_t),
+                ('discriminator-loss', self._discriminator_loss),
+                ('vf-loss', self._vf_loss_t),
+                ('kl-surrogate-loss', self._kl_surrogate_loss_t),
+                ('policy-reg-loss', self._policy_dist.reg_loss_t),
+                ('discriminator_reward', self._reward_pl),
+                ('log_p_z', self._log_p_z),
+                ]
+
         log_ops = [op for (name, op) in log_pairs]
         log_names = [name for (name, op) in log_pairs]
         log_vals = self._sess.run(log_ops, feed_dict)
@@ -591,6 +646,8 @@ class DIAYN(SAC):
                 logger.record_tabular('%s-min' % name, np.min(val))
                 logger.record_tabular('%s-max' % name, np.max(val))
                 logger.record_tabular('%s-std' % name, np.std(val))
+
+        # this might need to be removed from here.
         logger.record_tabular('z-entropy', scipy.stats.entropy(self._p_z))
 
         self._policy.log_diagnostics(batch)
