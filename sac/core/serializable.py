@@ -2,6 +2,7 @@ from rllab.core.serializable import Serializable
 
 
 def deep_clone(obj):
+    print('obj', obj)
     assert isinstance(obj, Serializable)
 
     def maybe_deep_clone(o):

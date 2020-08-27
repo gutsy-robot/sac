@@ -2,7 +2,7 @@ import datetime
 import dateutil.tz
 import os
 import numpy as np
-
+from rllab.spaces import Box
 
 def timestamp():
     now = datetime.datetime.now(dateutil.tz.tzlocal())
@@ -45,6 +45,30 @@ def _softmax(x):
     max_x = np.max(x)
     exp_x = np.exp(x - max_x)
     return exp_x / np.sum(exp_x)
+
+# wrapper to treat multi-agent env as single agent
+class PseudoSingleAgentEnv():
+    def __init__(self, env):
+        self.env = env
+        self.num_agents, self.single_obs_dim = np.array(self.env.reset()).shape
+        self.observation_space = Box(low=-np.inf, high=-np.inf, shape=[self.num_agents*self.single_obs_dim])
+        self.action_space = Box(low=-1, high=1, shape=[2*self.num_agents])
+        self.spec = spec(self.observation_space, self.action_space)
+
+    def reset(self):
+        return np.array(self.env.reset()).flatten()
+        
+    def step(self, a):    # act_dim*num_agents
+        a = np.split(a,self.num_agents)
+        obs, reward, done, info = self.env.step(a)
+
+        return np.array(obs).flatten(), np.sum(reward), np.any(done), info
+    def log_diagnostics(paths, *args, **kwargs):
+        print(paths)
+class spec():
+    def __init__(self, observation_space, action_space):
+        self.observation_space = observation_space
+        self.action_space = action_space
 
 PROJECT_PATH = os.path.dirname(
     os.path.realpath(os.path.join(__file__, '..', '..')))

@@ -3,6 +3,13 @@
 Usage:
     python mujoco_all_diayn.py --env=point --log_dir=/dev/null
 """
+import sys
+sys.path.append('../Learning-is-a-MUST')
+sys.path.append('../Learning-is-a-MUST/mape')
+from swarm.utils import make_multiagent_env
+from sac.misc.utils import PseudoSingleAgentEnv
+
+
 from rllab.envs.env_spec import EnvSpec
 from rllab.misc.instrument import VariantGenerator
 from rllab.envs.normalized_env import normalize
@@ -139,6 +146,14 @@ ENV_PARAMS = {
         'n_epochs': 1000,
         'scale_entropy': 0.1,
     },
+    'simple_obstacle': {
+        'prefix': 'simple_obstacle',
+        'env_name': 'simple_obstacle',
+        'layer_size': 32,
+        'max_path_length': 100,
+        'n_epochs': 50,
+        'scale_reward': 1,
+    },
 }
 DEFAULT_ENV = 'swimmer'
 AVAILABLE_ENVS = list(ENV_PARAMS.keys())
@@ -188,11 +203,13 @@ def run_experiment(variant):
     elif variant['env_name'] == 'point-rllab':
         from rllab.envs.mujoco.point_env import PointEnv
         env = normalize(PointEnv())
+    elif variant['env_name'] == 'simple_obstacle':
+        env = normalize(PseudoSingleAgentEnv(make_multiagent_env('simple_obstacle', 3, 0.1, 1, 0, num_steps=100, diff_reward=False, video_format='gif', discrete_action=False)))
     else:
         env = normalize(GymEnv(variant['env_name']))
 
     obs_space = env.spec.observation_space
-
+    print('obs_space', obs_space)
     # check the observation space should be continuous.
     assert isinstance(obs_space, spaces.Box)
 

@@ -451,7 +451,8 @@ class DIAYN(SAC):
                 logger.record_tabular('episode-length-max', np.max(episode_lengths))
                 logger.record_tabular('episode-length-std', np.std(episode_lengths))
 
-                self._eval_env.log_diagnostics(paths)
+                if hasattr(self._eval_env, 'log_diagnostics'):
+                    self._eval_env.log_diagnostics(paths)
 
         batch = self._pool.random_batch(self._batch_size)
         self.log_diagnostics(batch)

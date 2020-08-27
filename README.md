@@ -89,6 +89,7 @@ cd sac
 	conda activate sac
 	pip install -r requirements2.txt
 	pip install git+https://github.com/Theano/Theano.git@adfe319ce6b781083d8dc3200fb4481b00853791#egg=Theano
+	 pip install git+https://github.com/Ankur-Deka/gym.git@sac
 	```
 	1. conda yml file (didn't work for me)
 	```
@@ -96,6 +97,9 @@ cd sac
 	conda env create -f environment.yml
 	source activate sac
 	```
+
+6. For simple_obstacle environment
+	1. `git clone git@github.com:Ankur-Deka/Learning-is-a-MUST.git` in the same directory where you clone `sac`
 
 
 The environment should be ready to run. See examples section for examples of how to train and simulate the agents.
