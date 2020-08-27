@@ -151,8 +151,9 @@ ENV_PARAMS = {
         'env_name': 'simple_obstacle',
         'layer_size': 32,
         'max_path_length': 100,
-        'n_epochs': 50,
+        'n_epochs': 1000,
         'scale_reward': 1,
+        'num_skills': 5,
     },
 }
 DEFAULT_ENV = 'swimmer'
@@ -193,20 +194,24 @@ def get_variants(args):
     return vg
 
 
-def run_experiment(variant):
-    if variant['env_name'] == 'humanoid-rllab':
+def make_env(env_name):
+    if env_name == 'humanoid-rllab':
         from rllab.envs.mujoco.humanoid_env import HumanoidEnv
         env = normalize(HumanoidEnv())
-    elif variant['env_name'] == 'swimmer-rllab':
+    elif env_name == 'swimmer-rllab':
         from rllab.envs.mujoco.swimmer_env import SwimmerEnv
         env = normalize(SwimmerEnv())
-    elif variant['env_name'] == 'point-rllab':
+    elif env_name == 'point-rllab':
         from rllab.envs.mujoco.point_env import PointEnv
         env = normalize(PointEnv())
-    elif variant['env_name'] == 'simple_obstacle':
+    elif env_name == 'simple_obstacle':
         env = normalize(PseudoSingleAgentEnv(make_multiagent_env('simple_obstacle', 3, 0.1, 1, 0, num_steps=100, diff_reward=False, video_format='gif', discrete_action=False)))
     else:
-        env = normalize(GymEnv(variant['env_name']))
+        env = normalize(GymEnv(env_name))
+    return env
+
+def run_experiment(variant):
+    env = make_env(variant['env_name'])
 
     obs_space = env.spec.observation_space
     print('obs_space', obs_space)
@@ -289,7 +294,7 @@ def run_experiment(variant):
         include_actions=variant['include_actions'],
         learn_p_z=variant['learn_p_z'],
         add_p_z=variant['add_p_z'],
-        use_task_reward=False,
+        use_task_reward=True,
     )
 
     algorithm.train()

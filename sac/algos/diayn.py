@@ -451,8 +451,7 @@ class DIAYN(SAC):
                 logger.record_tabular('episode-length-max', np.max(episode_lengths))
                 logger.record_tabular('episode-length-std', np.std(episode_lengths))
 
-                if hasattr(self._eval_env, 'log_diagnostics'):
-                    self._eval_env.log_diagnostics(paths)
+                self._eval_env.log_diagnostics(paths)
 
         batch = self._pool.random_batch(self._batch_size)
         self.log_diagnostics(batch)
@@ -571,7 +570,11 @@ class DIAYN(SAC):
                 self._evaluate(epoch)
 
                 params = self.get_snapshot(epoch)
-                logger.save_itr_params(epoch, params)
+                new_params={}
+                for k,v in params.items():
+                    if not k.startswith('env'):
+                        new_params[k]=v
+                logger.save_itr_params(epoch, new_params)
                 times_itrs = gt.get_times().stamps.itrs
 
                 # some additional stuff to be added to the logger.

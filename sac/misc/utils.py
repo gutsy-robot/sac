@@ -3,6 +3,7 @@ import dateutil.tz
 import os
 import numpy as np
 from rllab.spaces import Box
+import sys
 
 def timestamp():
     now = datetime.datetime.now(dateutil.tz.tzlocal())
@@ -30,10 +31,12 @@ def _save_video(paths, filename):
     import cv2
     assert all(['ims' in path for path in paths])
     ims = [im for path in paths for im in path['ims']]
+    # print('ims', ims)
     _make_dir(filename)
 
     # Define the codec and create VideoWriter object
-    fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+    # fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+    fourcc = cv2.VideoWriter_fourcc(*'vp80')
     fps = 30.0
     (height, width, _) = ims[0].shape
     writer = cv2.VideoWriter(filename, fourcc, fps, (width, height))
@@ -63,8 +66,16 @@ class PseudoSingleAgentEnv():
         obs, reward, done, info = self.env.step(a)
 
         return np.array(obs).flatten(), np.sum(reward), np.any(done), info
-    def log_diagnostics(paths, *args, **kwargs):
-        print(paths)
+    
+    def log_diagnostics(self, paths, *args, **kwargs):
+        # print(paths)
+        pass
+
+    def render(self, **kwargs):
+        # print('args', args)
+        # print('kwargs', kwargs)
+        return self.env.render(mode=kwargs['mode'])[0]
+
 class spec():
     def __init__(self, observation_space, action_space):
         self.observation_space = observation_space

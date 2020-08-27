@@ -6,6 +6,11 @@ import os
 from sac.misc import utils
 from sac.policies.hierarchical_policy import FixedOptionPolicy
 from sac.misc.sampler import rollouts
+import sys, os
+sys.path.append('..')
+print(os.getcwd())
+print(sys.path)
+from examples.mujoco_all_diayn import make_env
 
 
 if __name__ == "__main__":
@@ -18,13 +23,16 @@ if __name__ == "__main__":
                         action='store_true')
     parser.add_argument('--no-deterministic', '-nd', dest='deterministic',
                         action='store_false')
+    parser.add_argument('--env', type=str, default=None)
     parser.add_argument('--separate_videos', type=bool, default=False)
     parser.set_defaults(deterministic=True)
 
     args = parser.parse_args()
-    filename = os.path.splitext(args.file)[0] + '.avi'
-    best_filename = os.path.splitext(args.file)[0] + '_best.avi'
-    worst_filename = os.path.splitext(args.file)[0] + '_worst.avi'
+    base = args.file.split('.')[0]+'_videos'
+    
+    filename = os.path.join(base, 'all.webm')
+    best_filename = os.path.join(base,'best.webm')
+    worst_filename = os.path.join(base, 'worst.webm')
 
     path_list = []
     reward_list = []
@@ -32,8 +40,10 @@ if __name__ == "__main__":
     with tf.Session() as sess:
         data = joblib.load(args.file)
         policy = data['policy']
-        env = data['env']
-        num_skills = data['policy'].observation_space.flat_dim - data['env'].spec.observation_space.flat_dim
+
+        # env = data['env']
+        env = make_env(args.env)
+        num_skills = data['policy'].observation_space.flat_dim - env.spec.observation_space.flat_dim
         print('num_skills', num_skills)
         with policy.deterministic(args.deterministic):
             for z in range(num_skills):
@@ -46,9 +56,9 @@ if __name__ == "__main__":
                 reward_list.append(total_returns)
 
                 if args.separate_videos:
-                    base = os.path.splitext(args.file)[0]
-                    end = '_skill_%02d.avi' % z
-                    skill_filename = base + end
+                    end = 'skill_%02d.webm' % z
+                    skill_filename = os.path.join(base,end)
+                    print(skill_filename)
                     utils._save_video(new_paths, skill_filename)
 
         if not args.separate_videos:
